@@ -357,8 +357,14 @@ int main(void)
           // From pump off to pump on, setup timeout
           initAfterTime(&pumpOnTimeout, PUMP_ON_TIMEOUT_MS);
         } else if (isAfterTime(&pumpOnTimeout)) {
-          // Pump on timeout, set error flat to keep all valves & pump off
+          // Pump on timeout, set error flag to keep all valves & pump off
           isError = true;
+
+          LOG("[Error] Pump on timeout[%ums]!", PUMP_ON_TIMEOUT_MS);
+          LOG("    1. Check there is no leakage in all tubes & humidifier tank.");
+          LOG("    2. Check level sensor is correct in humidifier tank.");
+          LOG("    3. Check empty sensor is correct in water tank.");
+          LOG("Then reset the controller!");
           continue;
         }
       }
