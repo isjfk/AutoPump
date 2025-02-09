@@ -1,4 +1,7 @@
+# Keil files
 MDK-ARM/AutoPump
+*.uvgui.*
+*.uvguix.*
 
 # Prerequisites
 *.d
