@@ -49,13 +49,15 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define VALVE_ON_LEVEL            SensorLevel0
-#define VALVE_OFF_LEVEL           SensorLevel4
-#define PUMP_ON_TIMEOUT_MS        (1000 * 60)
-#define TANK_EMPTY_BLINK_MS       (500)
-#define FILTER_UP_PERIOD_MS       (200)
-#define FILTER_DOWN_PERIOD_MS     (1000)
-#define FILTER_THRESHOULD         (0.2)
+#define POWER_UP_DELAY                (2000)
+#define VALVE_ON_LEVEL                SensorLevel0
+#define VALVE_OFF_LEVEL               SensorLevel4
+#define PUMP_ON_TIMEOUT_MS            (1000 * 60)
+#define TANK_EMPTY_BLINK_MS           (500)
+#define FILTER_UP_PERIOD_MS           (200)
+#define FILTER_DOWN_PERIOD_MS         (1000)
+#define TANK_EMPYT_FILTER_PERIOD_MS   (5000)
+#define FILTER_THRESHOULD             (0.15)
 
 /* USER CODE END PD */
 
@@ -241,7 +243,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
   initSensorFilter(&sensor0Filter, FILTER_UP_PERIOD_MS, FILTER_DOWN_PERIOD_MS, FILTER_THRESHOULD);
   initSensorFilter(&sensor1Filter, FILTER_UP_PERIOD_MS, FILTER_DOWN_PERIOD_MS, FILTER_THRESHOULD);
-  initSensorFilter(&sensorEmptyFilter, FILTER_UP_PERIOD_MS, FILTER_DOWN_PERIOD_MS, FILTER_THRESHOULD);
+  initSensorFilter(&sensorEmptyFilter, TANK_EMPYT_FILTER_PERIOD_MS, TANK_EMPYT_FILTER_PERIOD_MS, FILTER_THRESHOULD);
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -266,32 +268,46 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  ledOff(RED);
-  ledOff(GREEN);
-  ledOff(BLUE);
 
   //HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_3);
   HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_4);
 
+  // Init log cycle before power up delay, so log will be print at first main loop
+  TimerContext logCycle;
+  initCycleTime(&logCycle, 500);
+
   LOG("AutoPump initialized!");
+
+  // Power up delay, for sensor value to be stablized
+  LOG("Power up delay start...");
+  ledOn(BLUE);
+  TimerContext powerUpDelay;
+  initAfterTime(&powerUpDelay, POWER_UP_DELAY);
+  while (!isAfterTime(&powerUpDelay)) {
+    sensorFilter(&sensorEmptyFilter, isSensorEmpty() ? 1 : 0);
+    HAL_IWDG_Refresh(&hiwdg);
+  }
+  ledOff(BLUE);
+  LOG("Power up delay end");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   bool isTankEmpty = false;
   bool isLedRedOn = false;
-  bool isLedGreenOn = true;
+  bool isLedGreenOn = false;
   bool isValve0On = false;
   bool isValve1On = false;
   bool isPumpOn = false;
   bool isError = false;
 
   TimerContext pumpOnTimeout;
-  TimerContext tankEmptyCycle;
+  TimerContext tankEmptyBlinkCycle;
 
-  TimerContext logCycle;
-  initCycleTime(&logCycle, 500);
+  LOG("Enter main loop");
+
   while (1)
   {
     int sensorEmptyLevel = sensorFilter(&sensorEmptyFilter, isSensorEmpty() ? 1 : 0);
@@ -301,7 +317,6 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     isTankEmpty = sensorEmptyLevel > 0;
-    
     // For debug purpose
     //isTankEmpty = !isTankEmpty;
 
@@ -313,9 +328,9 @@ int main(void)
       isPumpOn = false;
     } else if (isTankEmpty) {
       if (!isPrevTankEmpty) {
-        initCycleTime(&tankEmptyCycle, TANK_EMPTY_BLINK_MS);
+        initCycleTime(&tankEmptyBlinkCycle, TANK_EMPTY_BLINK_MS);
         isLedRedOn = true;
-      } else if (isOnCycleTime(&tankEmptyCycle)) {
+      } else if (isOnCycleTime(&tankEmptyBlinkCycle)) {
         isLedRedOn = !isLedRedOn;
       }
       isLedGreenOn = false;
