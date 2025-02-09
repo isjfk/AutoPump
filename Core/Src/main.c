@@ -125,10 +125,10 @@ void initCycleTime(TimerContext* context, uint32_t cycleTimeMs) {
 
 bool isOnCycleTime(TimerContext* context) {
   uint32_t currTick = HAL_GetTick();
-  uint32_t interval = (currTick > context->startTick) ? currTick - context->startTick : 0;
+  uint32_t interval = currTick - context->startTick;
   if (interval > context->targetTick) {
     uint32_t tickShift = ((interval / context->targetTick) > 1) ? 0 : (interval % context->targetTick);
-    context->startTick = currTick + tickShift;
+    context->startTick = currTick - tickShift;
     return true;
   }
   return false;
