@@ -49,10 +49,11 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#define VERSION_STR										"1.0.1"
 #define POWER_UP_DELAY                (2000)
 #define VALVE_ON_LEVEL                SensorLevel0
 #define VALVE_OFF_LEVEL               SensorLevel4
-#define PUMP_ON_TIMEOUT_MS            (1000 * 60)
+#define PUMP_ON_TIMEOUT_MS            (10000 * 60)
 #define TANK_EMPTY_BLINK_MS           (500)
 #define FILTER_UP_PERIOD_MS           (200)
 #define FILTER_DOWN_PERIOD_MS         (1000)
@@ -277,7 +278,7 @@ int main(void)
   TimerContext logCycle;
   initCycleTime(&logCycle, 500);
 
-  LOG("AutoPump initialized!");
+  LOG("AutoPump v%s initialized!", VERSION_STR);
 
   // Power up delay, for sensor value to be stablized
   LOG("Power up delay start...");
@@ -306,7 +307,7 @@ int main(void)
   TimerContext pumpOnTimeout;
   TimerContext tankEmptyBlinkCycle;
 
-  LOG("Enter main loop");
+  LOG("AutoPump v%s main loop start...", VERSION_STR);
 
   while (1)
   {
@@ -338,16 +339,24 @@ int main(void)
       isValve1On = false;
       isPumpOn = false;
     } else {
-      if (sensor0Level <= VALVE_ON_LEVEL) {
-        isValve0On = true;
-      } else if(sensor0Level >= VALVE_OFF_LEVEL) {
+      if(sensor0Level >= VALVE_OFF_LEVEL) {
         isValve0On = false;
+      } else if (sensor0Level <= VALVE_ON_LEVEL) {
+        isValve0On = true;
+        // Also open Valve1 if Sensor1 is not full
+        if (sensor1Level < VALVE_OFF_LEVEL) {
+          isValve1On = true;
+        }
       }
 
-      if (sensor1Level <= VALVE_ON_LEVEL) {
-        isValve1On = true;
-      } else if (sensor1Level >= VALVE_OFF_LEVEL) {
+      if (sensor1Level >= VALVE_OFF_LEVEL) {
         isValve1On = false;
+      } else if (sensor1Level <= VALVE_ON_LEVEL) {
+        isValve1On = true;
+        // Also open Valve0 if Sensor0 is not full
+        if (sensor0Level < VALVE_OFF_LEVEL) {
+          isValve0On = true;
+        }
       }
 
       isPumpOn = isValve0On || isValve1On;
