@@ -44,17 +44,31 @@ typedef struct {
   int currValue;
 } FilterContext;
 
+typedef struct {
+  int sensorEmptyLevel;
+  SensorLevel sensor0Level;
+  SensorLevel sensor1Level;
+  bool isTankEmpty;
+  bool isLedRedOn;
+  bool isLedGreenOn;
+  bool isValve0On;
+  bool isValve1On;
+  bool isPumpOn;
+  bool isError;
+} RuntimeContext;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define VERSION_STR										"1.0.1"
+#define VERSION_STR                   "1.0.2"
 #define POWER_UP_DELAY                (2000)
 #define VALVE_ON_LEVEL                SensorLevel0
-#define VALVE_OFF_LEVEL               SensorLevel4
-#define PUMP_ON_TIMEOUT_MS            (10000 * 60)
+#define VALVE_OFF_LEVEL               SensorLevel3
+#define PUMP_ON_TIMEOUT_MS            (1000 * 600)
 #define TANK_EMPTY_BLINK_MS           (500)
+#define ERROR_BLINK_MS                (200)
 #define FILTER_UP_PERIOD_MS           (200)
 #define FILTER_DOWN_PERIOD_MS         (1000)
 #define TANK_EMPYT_FILTER_PERIOD_MS   (5000)
@@ -89,6 +103,8 @@ FilterContext sensor1Filter;
 volatile SensorLevel sensor1Level = 0;
 
 FilterContext sensorEmptyFilter;
+
+volatile RuntimeContext rtCtx;
 
 /* USER CODE END PV */
 
@@ -232,6 +248,38 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
   }
 }
 
+void execCtrl() {
+  if (rtCtx.isLedRedOn) {
+    ledOn(RED);
+  } else {
+    ledOff(RED);
+  }
+  if (rtCtx.isLedGreenOn) {
+    ledOn(GREEN);
+  } else {
+    ledOff(GREEN);
+  }
+  if (rtCtx.isValve0On) {
+    valve0On();
+  } else {
+    valve0Off();
+  }
+  if (rtCtx.isValve1On) {
+    valve1On();
+  } else {
+    valve1Off();
+  }
+  if (rtCtx.isPumpOn) {
+    pumpOn();
+  } else {
+    pumpOff();
+  }
+}
+
+void logStatus() {
+  LOG("S0[%u] S1[%u] SE[%u] | V0[%u] V1[%u] Pump[%u] | R[%u] G[%u] ", rtCtx.sensor0Level, rtCtx.sensor1Level, rtCtx.sensorEmptyLevel, rtCtx.isValve0On, rtCtx.isValve1On, rtCtx.isPumpOn, rtCtx.isLedRedOn, rtCtx.isLedGreenOn);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -292,124 +340,118 @@ int main(void)
   ledOff(BLUE);
   LOG("Power up delay end");
 
+  rtCtx.isTankEmpty = false;
+  rtCtx.isLedRedOn = false;
+  rtCtx.isLedGreenOn = false;
+  rtCtx.isValve0On = false;
+  rtCtx.isValve1On = false;
+  rtCtx.isPumpOn = false;
+  rtCtx.isError = false;
+  execCtrl();
+  LOG("Initialize all controls");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  bool isTankEmpty = false;
-  bool isLedRedOn = false;
-  bool isLedGreenOn = false;
-  bool isValve0On = false;
-  bool isValve1On = false;
-  bool isPumpOn = false;
-  bool isError = false;
-
   TimerContext pumpOnTimeout;
   TimerContext tankEmptyBlinkCycle;
+  TimerContext errorBlinkCycle;
 
   LOG("AutoPump v%s main loop start...", VERSION_STR);
 
   while (1)
   {
-    int sensorEmptyLevel = sensorFilter(&sensorEmptyFilter, isSensorEmpty() ? 1 : 0);
-    bool isPrevTankEmpty = isTankEmpty;
-    bool isPrevPumpOn = isPumpOn;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    isTankEmpty = sensorEmptyLevel > 0;
+    // Save previous status to detect transition
+    bool isPrevTankEmpty = rtCtx.isTankEmpty;
+    bool isPrevPumpOn = rtCtx.isPumpOn;
+
+    // Get sensor values
+    __disable_irq();
+    rtCtx.sensorEmptyLevel = sensorFilter(&sensorEmptyFilter, isSensorEmpty() ? 1 : 0);
+    rtCtx.sensor0Level = sensor0Level;
+    rtCtx.sensor1Level = sensor1Level;
+    __enable_irq();
+
+    rtCtx.isTankEmpty = rtCtx.sensorEmptyLevel > 0;
     // For debug purpose
     //isTankEmpty = !isTankEmpty;
 
-    if (isError) {
-      isLedRedOn = true;
-      isLedGreenOn = false;
-      isValve0On = false;
-      isValve1On = false;
-      isPumpOn = false;
-    } else if (isTankEmpty) {
+    if (rtCtx.isError) {
+      if (isOnCycleTime(&errorBlinkCycle)) {
+        rtCtx.isLedRedOn = !rtCtx.isLedRedOn;
+      }
+      rtCtx.isLedGreenOn = false;
+      rtCtx.isValve0On = false;
+      rtCtx.isValve1On = false;
+      rtCtx.isPumpOn = false;
+    } else if (rtCtx.isTankEmpty) {
       if (!isPrevTankEmpty) {
         initCycleTime(&tankEmptyBlinkCycle, TANK_EMPTY_BLINK_MS);
-        isLedRedOn = true;
+        rtCtx.isLedRedOn = true;
       } else if (isOnCycleTime(&tankEmptyBlinkCycle)) {
-        isLedRedOn = !isLedRedOn;
+        rtCtx.isLedRedOn = !rtCtx.isLedRedOn;
       }
-      isLedGreenOn = false;
-      isValve0On = false;
-      isValve1On = false;
-      isPumpOn = false;
+      rtCtx.isLedGreenOn = true;
+      rtCtx.isValve0On = false;
+      rtCtx.isValve1On = false;
+      rtCtx.isPumpOn = false;
     } else {
-      if(sensor0Level >= VALVE_OFF_LEVEL) {
-        isValve0On = false;
-      } else if (sensor0Level <= VALVE_ON_LEVEL) {
-        isValve0On = true;
+      if (rtCtx.sensor0Level <= VALVE_ON_LEVEL) {
+        rtCtx.isValve0On = true;
         // Also open Valve1 if Sensor1 is not full
-        if (sensor1Level < VALVE_OFF_LEVEL) {
-          isValve1On = true;
+        if (rtCtx.sensor1Level < VALVE_OFF_LEVEL) {
+          rtCtx.isValve1On = true;
         }
       }
 
-      if (sensor1Level >= VALVE_OFF_LEVEL) {
-        isValve1On = false;
-      } else if (sensor1Level <= VALVE_ON_LEVEL) {
-        isValve1On = true;
+      if (rtCtx.sensor1Level <= VALVE_ON_LEVEL) {
+        rtCtx.isValve1On = true;
         // Also open Valve0 if Sensor0 is not full
-        if (sensor0Level < VALVE_OFF_LEVEL) {
-          isValve0On = true;
+        if (rtCtx.sensor0Level < VALVE_OFF_LEVEL) {
+          rtCtx.isValve0On = true;
         }
       }
 
-      isPumpOn = isValve0On || isValve1On;
-      if (isPumpOn) {
+      if (rtCtx.sensor0Level >= VALVE_OFF_LEVEL) {
+        rtCtx.isValve0On = false;
+      }
+      if (rtCtx.sensor1Level >= VALVE_OFF_LEVEL) {
+        rtCtx.isValve1On = false;
+      }
+
+      rtCtx.isPumpOn = rtCtx.isValve0On || rtCtx.isValve1On;
+      if (rtCtx.isPumpOn) {
         // Check previous pump on state
         if (!isPrevPumpOn) {
           // From pump off to pump on, setup timeout
           initAfterTime(&pumpOnTimeout, PUMP_ON_TIMEOUT_MS);
         } else if (isAfterTime(&pumpOnTimeout)) {
           // Pump on timeout, set error flag to keep all valves & pump off
-          isError = true;
+          rtCtx.isError = true;
+          rtCtx.isLedRedOn = true;
+          initCycleTime(&errorBlinkCycle, ERROR_BLINK_MS);
 
           LOG("[Error] Pump on timeout[%ums]!", PUMP_ON_TIMEOUT_MS);
           LOG("    1. Check there is no leakage in all tubes & humidifier tank.");
           LOG("    2. Check level sensor is correct in humidifier tank.");
           LOG("    3. Check empty sensor is correct in water tank.");
-          LOG("Then reset the controller!");
+          LOG("Then restart the controller!");
           continue;
         }
       }
 
-      isLedRedOn = isPumpOn;
-      isLedGreenOn = true;
+      rtCtx.isLedRedOn = rtCtx.isPumpOn;
+      rtCtx.isLedGreenOn = true;
     }
 
-    if (isLedRedOn) {
-      ledOn(RED);
-    } else {
-      ledOff(RED);
-    }
-    if (isLedGreenOn) {
-      ledOn(GREEN);
-    } else {
-      ledOff(GREEN);
-    }
-    if (isValve0On) {
-      valve0On();
-    } else {
-      valve0Off();
-    }
-    if (isValve1On) {
-      valve1On();
-    } else {
-      valve1Off();
-    }
-    if (isPumpOn) {
-      pumpOn();
-    } else {
-      pumpOff();
-    }
+    execCtrl();
 
     if (isOnCycleTime(&logCycle)) {
-      LOG("S0[%u] S1[%u] SE[%u] | V0[%u] V1[%u] Pump[%u] | R[%u] G[%u] ", sensor0Level, sensor1Level, sensorEmptyLevel, isValve0On, isValve1On, isPumpOn, isLedRedOn, isLedGreenOn);
+      logStatus();
     }
 
     HAL_IWDG_Refresh(&hiwdg);
@@ -640,6 +682,15 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+
+  rtCtx.isLedRedOn = true;
+  rtCtx.isLedGreenOn = false;
+  rtCtx.isValve0On = false;
+  rtCtx.isValve1On = false;
+  rtCtx.isPumpOn = false;
+  execCtrl();
+  logStatus();
+
   while (1)
   {
   }
