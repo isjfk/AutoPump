@@ -54,7 +54,7 @@ typedef struct {
   bool isValve0On;
   bool isValve1On;
   bool isPumpOn;
-  bool isError;
+  bool isPumpOnTimeout;
 } RuntimeContext;
 
 /* USER CODE END PTD */
@@ -62,11 +62,11 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define VERSION_STR                   "1.0.2"
+#define VERSION_STR                   "1.0.3"
 #define POWER_UP_DELAY                (2000)
 #define VALVE_ON_LEVEL                SensorLevel0
 #define VALVE_OFF_LEVEL               SensorLevel3
-#define PUMP_ON_TIMEOUT_MS            (1000 * 600)
+#define PUMP_ON_TIMEOUT_MS            (1000 * 300)
 #define TANK_EMPTY_BLINK_MS           (500)
 #define ERROR_BLINK_MS                (200)
 #define FILTER_UP_PERIOD_MS           (200)
@@ -346,7 +346,7 @@ int main(void)
   rtCtx.isValve0On = false;
   rtCtx.isValve1On = false;
   rtCtx.isPumpOn = false;
-  rtCtx.isError = false;
+  rtCtx.isPumpOnTimeout = false;
   execCtrl();
   LOG("Initialize all controls");
 
@@ -380,7 +380,7 @@ int main(void)
     // For debug purpose
     //isTankEmpty = !isTankEmpty;
 
-    if (rtCtx.isError) {
+    if (rtCtx.isPumpOnTimeout) {
       if (isOnCycleTime(&errorBlinkCycle)) {
         rtCtx.isLedRedOn = !rtCtx.isLedRedOn;
       }
@@ -388,6 +388,11 @@ int main(void)
       rtCtx.isValve0On = false;
       rtCtx.isValve1On = false;
       rtCtx.isPumpOn = false;
+
+      if ((rtCtx.sensor0Level > VALVE_ON_LEVEL) || (rtCtx.sensor1Level > VALVE_ON_LEVEL)) {
+        rtCtx.isPumpOnTimeout = false;
+        rtCtx.isLedRedOn = false;
+      }
     } else if (rtCtx.isTankEmpty) {
       if (!isPrevTankEmpty) {
         initCycleTime(&tankEmptyBlinkCycle, TANK_EMPTY_BLINK_MS);
@@ -431,7 +436,7 @@ int main(void)
           initAfterTime(&pumpOnTimeout, PUMP_ON_TIMEOUT_MS);
         } else if (isAfterTime(&pumpOnTimeout)) {
           // Pump on timeout, set error flag to keep all valves & pump off
-          rtCtx.isError = true;
+          rtCtx.isPumpOnTimeout = true;
           rtCtx.isLedRedOn = true;
           initCycleTime(&errorBlinkCycle, ERROR_BLINK_MS);
 
